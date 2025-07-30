@@ -16,8 +16,19 @@ const extraDataService = {
         }
     },
 
-    getExtraData: async ({ id, testCaseId, nodeId, userId, roleId }) => {
+    getExtraData: async ({ id, testCaseId, nodeId, userId, roleId, roles }) => {
         try {
+            if (!roleId && roles) {
+                const role = await prisma.role.findUnique({ where: { name: roles } });
+                if (!role) {
+                    return {
+                        status: 404,
+                        success: false,
+                        message: `Role with name '${roles}' not found`,
+                    };
+                }
+                roleId = role.id;
+            }
             // Nếu truyền id → tìm theo id duy nhất
             if (id) {
                 const record = await prisma.extraData.findUnique({
