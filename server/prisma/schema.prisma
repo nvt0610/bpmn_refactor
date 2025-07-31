@@ -41,8 +41,8 @@ model TestCase {
   project   String?
   status    Status         @default(DRAFT)
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
 
   xmlContent  String?
   jsonContent Json?

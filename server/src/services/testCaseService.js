@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
+import path from "path";
+import fs from "fs";
 
 const testCaseService = {
     getAllTestCases: async () => {
@@ -55,6 +57,8 @@ const testCaseService = {
     },
 
     createTestCase: async (payload) => {
+        console.log(payload);
+        
         const {
             name,
             type,
@@ -77,8 +81,8 @@ const testCaseService = {
         }
 
         try {
-            const existing = await prisma.testCase.findFirst({
-                where: { name },
+            const existing = await prisma.TestCase.findFirst({
+                where: { name, userId },
             });
 
             if (existing) {
@@ -89,7 +93,7 @@ const testCaseService = {
                 };
             }
 
-            const testCase = await prisma.testCase.create({
+            const testCase = await prisma.TestCase.create({
                 data: {
                     name,
                     userId,
