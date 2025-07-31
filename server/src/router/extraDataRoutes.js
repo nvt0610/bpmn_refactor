@@ -4,7 +4,7 @@ import extraDataController from "../controllers/extraDataController.js";
 const router = express.Router();
 
 const extraDataRoutes = (app) => {
-    router.get("/", extraDataController.getAllExtraData);
+    router.get("/all", extraDataController.getAllExtraData);
     router.get("/", extraDataController.getExtraData);
     router.post("/", extraDataController.createExtraData);
     router.put("/:id", extraDataController.updateExtraData);      // cần id để update

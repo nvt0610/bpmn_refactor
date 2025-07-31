@@ -1,224 +1,219 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
+const unwrapData = (record) => {
+    if (!record?.data || typeof record.data !== "object") return record;
+    const [key] = Object.keys(record.data);
+    return {
+        ...record,
+        [key]: record.data[key],
+        data: undefined,
+    };
+};
+
 const extraDataService = {
     getAllExtraData: async () => {
-        try {
-            const records = await prisma.extraData.findMany();
-            return {
-                status: 200,
-                success: true,
-                message: "ExtraData fetched successfully",
-                data: records,
-            };
-        } catch (error) {
-            throw new Error("Failed to fetch ExtraData: " + error.message);
-        }
+        const records = await prisma.extraData.findMany();
+        return {
+            status: 200,
+            success: true,
+            message: "ExtraData fetched successfully",
+            data: records.map(unwrapData),
+        };
     },
 
-    getExtraData: async ({ id, testCaseId, nodeId, userId, roleId, roles }) => {
-        try {
-            if (!roleId && roles) {
-                const role = await prisma.role.findUnique({ where: { name: roles } });
-                if (!role) {
-                    return {
-                        status: 404,
-                        success: false,
-                        message: `Role with name '${roles}' not found`,
-                    };
-                }
-                roleId = role.id;
-            }
-            // Nếu truyền id → tìm theo id duy nhất
-            if (id) {
-                const record = await prisma.extraData.findUnique({
-                    where: { id },
-                });
+    getExtraData: async ({ id, testCaseId, nodeId, userId, roleId, roles, dataType, hasField }) => {
+        if (id) {
+            const record = await prisma.extraData.findUnique({ where: { id } });
+            if (!record) return { status: 404, success: false, message: "ExtraData not found by ID" };
+            return { status: 200, success: true, message: "ExtraData found by ID", data: unwrapData(record) };
+        }
 
-                if (!record) {
-                    return {
-                        status: 404,
-                        success: false,
-                        message: "ExtraData not found by ID",
-                    };
-                }
+        let testCaseNodeIds = [];
+        if (testCaseId) {
+            const nodeFilter = nodeId ? { testCaseId, nodeId } : { testCaseId };
+            const testCaseNodes = await prisma.testCaseNode.findMany({ where: nodeFilter, select: { id: true } });
+            testCaseNodeIds = testCaseNodes.map((n) => n.id);
+        }
 
-                return {
-                    status: 200,
-                    success: true,
-                    message: "ExtraData found by ID",
-                    data: record,
-                };
-            }
-            // Nếu không truyền id → tìm theo các trường khác
-            const whereClause = {
-                ...(testCaseId && { testCaseId }),
-                ...(nodeId && { nodeId }),
-                ...(userId && { userId }),
-                ...(roleId && { roleId }),
-            };
+        let isQC = false;
+        if (userId) {
+            const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+            if (user?.role?.name === "QC") isQC = true;
+        }
 
-            const records = await prisma.extraData.findMany({
-                where: whereClause,
+        let records = [];
+        if (roles) {
+            records = await prisma.extraData.findMany({
+                where: {
+                    user: { role: { name: { in: roles.split(",") } } },
+                    ...(testCaseNodeIds.length && { testCaseNodeId: { in: testCaseNodeIds } }),
+                },
+                include: { user: true },
+            });
+        } else {
+            records = await prisma.extraData.findMany({
+                where: {
+                    ...(testCaseNodeIds.length && { testCaseNodeId: { in: testCaseNodeIds } }),
+                    ...(userId && !isQC ? { userId } : {}),
+                    ...(roleId && { roleId }),
+                },
                 include: roleId ? { user: true } : undefined,
             });
-
-            if (records.length === 0) {
-                return {
-                    status: 404,
-                    success: false,
-                    message: "No ExtraData found for given criteria",
-                };
-            }
-
-            return {
-                status: 200,
-                success: true,
-                message: "ExtraData fetched successfully",
-                data: records,
-            };
-        } catch (error) {
-            throw new Error("Failed to fetch ExtraData: " + error.message);
         }
+
+        records = records.filter(
+            (r) =>
+                (!dataType || (r.data && r.data[dataType])) &&
+                (!hasField || (r.data && r.data.hasOwnProperty(hasField)))
+        );
+
+        if (records.length === 0) {
+            return {
+                status: 404,
+                success: false,
+                message: "No ExtraData found for given criteria",
+            };
+        }
+
+        return {
+            status: 200,
+            success: true,
+            message: "ExtraData fetched successfully",
+            data: records.map(unwrapData),
+        };
     },
 
-    createExtraData: async ({ testCaseId, nodeId, userId, roleId, data }) => {
-        try {
-            const user = await prisma.user.findUnique({
-                where: { id: userId },
-                select: { roleId: true },
-            });
+    createExtraData: async ({ testCaseId, userId, data }) => {
+        const results = [];
+        const user = await prisma.user.findUnique({ where: { id: userId }, select: { roleId: true } });
+        if (!user) return { status: 404, success: false, message: "User not found" };
+        const roleId = user.roleId;
 
-            if (!user) {
-                return {
-                    status: 404,
-                    success: false,
-                    message: "User not found",
-                };
+        const testCaseNodes = await prisma.testCaseNode.findMany({ where: { testCaseId } });
+        const nodeMap = new Map(testCaseNodes.map((n) => [n.nodeId, n.id]));
+
+        const existingRecords = await prisma.extraData.findMany({
+            where: { userId, roleId, testCaseNodeId: { in: Array.from(nodeMap.values()) } },
+        });
+
+        const existingMap = new Map();
+        existingRecords.forEach((record) => {
+            existingMap.set(record.testCaseNodeId, record);
+        });
+
+        for (const item of data) {
+            const { nodeId, description, attachments, ...rest } = item;
+            const testCaseNodeId = nodeMap.get(nodeId);
+            if (!testCaseNodeId) {
+                results.push({ status: 404, success: false, message: "Node not found", data: item });
+                continue;
             }
 
-            const roleId = user.roleId;
+            const existing = existingMap.get(testCaseNodeId);
+            const dataPayload = Object.keys(rest).length > 0 ? rest : undefined;
 
-            const exists = await prisma.extraData.findFirst({
+            if (existing) {
+                const updated = await extraDataService.updateExtraData({
+                    id: existing.id,
+                    data: dataPayload,
+                    description,
+                    attachments,
+                });
+                results.push(updated);
+            } else {
+                const created = await prisma.extraData.create({
+                    data: {
+                        testCaseNodeId,
+                        userId,
+                        roleId,
+                        data: dataPayload,
+                        ...(description && { description }),
+                        ...(attachments && { attachments }),
+                    },
+                });
+                results.push({ status: 201, success: true, message: "Created new", data: unwrapData(created) });
+            }
+        }
+
+        return {
+            status: 207,
+            success: true,
+            message: "Processed all entries",
+            data: results,
+        };
+    },
+
+    updateExtraData: async ({ id, testCaseId, nodeId, userId, roleId, data, description, attachments }) => {
+        const existing = await prisma.extraData.findUnique({ where: { id } });
+        if (!existing) return { status: 404, success: false, message: "ExtraData not found" };
+
+        let testCaseNodeId = existing.testCaseNodeId;
+        if (testCaseId && nodeId) {
+            const node = await prisma.testCaseNode.findUnique({
                 where: {
-                    testCaseId,
-                    nodeId,
-                    userId,
-                    roleId,
+                    testCaseId_nodeId: {
+                        testCaseId,
+                        nodeId,
+                    },
                 },
             });
+            if (!node) return { status: 404, success: false, message: "TestCaseNode not found" };
+            testCaseNodeId = node.id;
+        }
 
-            if (exists) {
+        const newData = {
+            testCaseNodeId,
+            userId: userId ?? existing.userId,
+            roleId: roleId ?? existing.roleId,
+            data: data ?? existing.data,
+            description: description ?? existing.description,
+            attachments: attachments ?? existing.attachments,
+        };
+
+        const isKeyChanged =
+            newData.testCaseNodeId !== existing.testCaseNodeId ||
+            newData.userId !== existing.userId ||
+            newData.roleId !== existing.roleId;
+
+        if (isKeyChanged) {
+            const duplicate = await prisma.extraData.findFirst({
+                where: {
+                    testCaseNodeId: newData.testCaseNodeId,
+                    userId: newData.userId,
+                    roleId: newData.roleId,
+                    NOT: { id },
+                },
+            });
+            if (duplicate) {
                 return {
                     status: 409,
                     success: false,
-                    message: "ExtraData already exists for this testCaseId, nodeId, userId and roleId",
+                    message: "Another ExtraData with same key already exists",
                 };
             }
-
-            // 3. Tạo mới
-            const created = await prisma.extraData.create({
-                data: { testCaseId, nodeId, userId, roleId, data },
-            });
-
-            return {
-                status: 201,
-                success: true,
-                message: "ExtraData created successfully",
-                data: created,
-            };
-        } catch (error) {
-            throw new Error("Failed to create ExtraData: " + error.message);
         }
-    },
 
-    updateExtraData: async ({ id, testCaseId, nodeId, userId, roleId, data }) => {
-        try {
-            const existing = await prisma.extraData.findUnique({ where: { id } });
-            if (!existing) {
-                return { status: 404, success: false, message: "ExtraData not found" };
-            }
+        const updated = await prisma.extraData.update({
+            where: { id },
+            data: newData,
+        });
 
-            const newData = {
-                testCaseId: testCaseId ?? existing.testCaseId,
-                nodeId: nodeId ?? existing.nodeId,
-                userId: userId ?? existing.userId,
-                roleId: roleId ?? existing.roleId,
-                data: data ?? existing.data,
-            };
-
-            const noChange =
-                existing.testCaseId === newData.testCaseId &&
-                existing.nodeId === newData.nodeId &&
-                existing.userId === newData.userId &&
-                existing.roleId === newData.roleId &&
-                JSON.stringify(existing.data) === JSON.stringify(newData.data);
-
-            if (noChange) {
-                return {
-                    status: 400,
-                    success: false,
-                    message: "No fields have been modified. Update aborted.",
-                };
-            }
-
-            const isKeyChanged = (
-                newData.testCaseId !== existing.testCaseId ||
-                newData.nodeId !== existing.nodeId ||
-                newData.userId !== existing.userId ||
-                newData.roleId !== existing.roleId
-            );
-
-            if (isKeyChanged) {
-                const duplicate = await prisma.extraData.findFirst({
-                    where: {
-                        testCaseId: newData.testCaseId,
-                        nodeId: newData.nodeId,
-                        userId: newData.userId,
-                        roleId: newData.roleId,
-                        NOT: { id },
-                    },
-                });
-
-                if (duplicate) {
-                    return {
-                        status: 409,
-                        success: false,
-                        message: "Another ExtraData with same key already exists",
-                    };
-                }
-            }
-
-            const updated = await prisma.extraData.update({
-                where: { id },
-                data: newData,
-            });
-
-            return {
-                status: 200,
-                success: true,
-                message: "ExtraData updated successfully",
-                data: updated,
-            };
-        } catch (error) {
-            throw new Error("Failed to update ExtraData: " + error.message);
-        }
+        return {
+            status: 200,
+            success: true,
+            message: "ExtraData fully updated",
+            data: unwrapData(updated),
+        };
     },
 
     deleteExtraData: async ({ id }) => {
-        try {
-            await prisma.extraData.delete({
-                where: { id }, // id là string, Prisma expect kiểu `where: { id: string }`
-            });
-
-            return {
-                status: 200,
-                success: true,
-                message: "ExtraData deleted successfully",
-            };
-        } catch (error) {
-            throw new Error("Failed to delete ExtraData: " + error.message);
-        }
+        await prisma.extraData.delete({ where: { id } });
+        return {
+            status: 200,
+            success: true,
+            message: "ExtraData deleted successfully",
+        };
     },
 };
 

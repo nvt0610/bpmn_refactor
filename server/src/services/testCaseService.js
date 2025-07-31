@@ -25,7 +25,13 @@ const testCaseService = {
             const testCase = await prisma.testCase.findUnique({
                 where: { id },
                 include: {
-                    user: true
+                    user: true,
+                    testCaseNodes: {
+                        include: {
+                            extraData: true, // nếu cần lấy cả dữ liệu từng node
+                        },
+                    },
+                    testCaseWorkflow: true, // nếu dùng workflowId từ bảng phụ
                 },
             });
 
@@ -51,7 +57,6 @@ const testCaseService = {
     createTestCase: async (payload) => {
         const {
             name,
-            description,
             type,
             project,
             status,
@@ -59,7 +64,6 @@ const testCaseService = {
             xmlContent,
             jsonContent,
             nodeData,
-            Attachments,
         } = payload;
 
         // Load file mặc định nếu không truyền xmlContent
@@ -89,17 +93,21 @@ const testCaseService = {
                 data: {
                     name,
                     userId,
-                    ...(description && { description }),
                     ...(type && { type }),
                     ...(project && { project }),
                     ...(status && { status }),
                     ...(finalXmlContent && { xmlContent: finalXmlContent }),
                     ...(jsonContent && { jsonContent }),
-                    ...(nodeData && { nodeData }),
-                    ...(Attachments && { Attachments }),
+                    testCaseNodes: {
+                        create: nodeData?.map((node) => ({
+                            nodeId: node.nodeId,
+                        })) || [],
+                    },
+                },
+                include: {
+                    testCaseNodes: true,
                 },
             });
-
             return {
                 status: 201,
                 success: true,
@@ -182,6 +190,30 @@ const testCaseService = {
                 };
             }
 
+            // Lấy danh sách node liên quan
+            const nodes = await prisma.testCaseNode.findMany({
+                where: { testCaseId: id },
+                select: { id: true },
+            });
+
+            const nodeIds = nodes.map((n) => n.id);
+
+            // Xóa ExtraData trước
+            await prisma.extraData.deleteMany({
+                where: { testCaseNodeId: { in: nodeIds } },
+            });
+
+            // Xóa testCaseNode
+            await prisma.testCaseNode.deleteMany({
+                where: { testCaseId: id },
+            });
+
+            // Xóa testCaseWorkflow nếu có
+            await prisma.testCaseWorkflow.deleteMany({
+                where: { testCaseId: id },
+            });
+
+            // Cuối cùng xóa testCase
             await prisma.testCase.delete({ where: { id } });
 
             return {
