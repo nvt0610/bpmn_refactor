@@ -12,14 +12,89 @@ const unwrapData = (record) => {
 };
 
 const extraDataService = {
-    getAllExtraData: async () => {
-        const records = await prisma.extraData.findMany();
+
+    getN8nNode: async ({ id }) => {
+        // 1. Lấy ExtraData
+        const extraData = await prisma.extraData.findUnique({
+            where: { id },
+            include: {
+                testCaseNode: {
+                    include: { testCase: true }
+                }
+            }
+        });
+        if (!extraData) {
+            return { status: 404, success: false, message: "Not found", data: null };
+        }
+
+        // 2. Lấy TestCase.name và nodeId
+        const testCaseName = extraData.testCaseNode?.testCase?.name || "";
+        const nodeId = extraData.testCaseNode?.nodeId || "";
+
+        // 3. Lấy apis từ ExtraData.data
+        const data = extraData.data || {};
+        const apis = data.apis;
+        if (!apis || !Array.isArray(apis) || apis.length === 0) {
+            return { status: 400, success: false, message: "No API data", nodes: [] };
+        }
+
+        // 4. Mapping node như cũ, chỉ sửa id và name
+        const mapKeyValue = (obj) =>
+            obj && typeof obj === "object"
+                ? Object.entries(obj).map(([name, value]) => ({ name, value }))
+                : [];
+
+        // mapping mỗi api thành 1 node
+        const nodes = apis.map((api, idx) => ({
+            id: data.nodeId || extraData.testCaseNode?.nodeId || `${idx}`, // nếu muốn mỗi node có id riêng
+            name: api.name || testCaseName,
+            parameters: {
+                method: api.method || "GET",
+                options: api.option || {},
+                ...(api.header && Object.keys(api.header).length ? { headerParameters: { parameters: mapKeyValue(api.header) } } : {}),
+                ...(api.queryParams && Object.keys(api.queryParams).length ? { queryParameters: { parameters: mapKeyValue(api.queryParams) } } : {}),
+                ...(api.body && Object.keys(api.body).length ? { bodyParameters: { parameters: mapKeyValue(api.body) } } : {}),
+                sendBody: !!(api.body && Object.keys(api.body || {}).length),
+                sendHeaders: !!(api.header && Object.keys(api.header || {}).length),
+                sendQuery: !!(api.queryParams && Object.keys(api.queryParams || {}).length),
+                url: api.url
+            },
+            type: "n8n-nodes-base.httpRequest"
+        }));
+
+        // 5. Trả về đúng format mẫu
         return {
             status: 200,
-            success: true,
-            message: "ExtraData fetched successfully",
-            data: records.map(unwrapData),
+            name: testCaseName,
+            nodes
         };
+    },
+
+    getAllExtraData: async ({ page, pageSize } = {}) => {
+        try {
+            let options = {};
+            if (page && pageSize) {
+                options.skip = (parseInt(page) - 1) * parseInt(pageSize);
+                options.take = parseInt(pageSize);
+            }
+
+            const [records, total] = await Promise.all([
+                prisma.extraData.findMany(options),
+                prisma.extraData.count(),
+            ]);
+
+            return {
+                status: 200,
+                success: true,
+                message: "ExtraData fetched successfully",
+                data: records.map(unwrapData),
+                total,
+                page: page ? parseInt(page) : undefined,
+                pageSize: pageSize ? parseInt(pageSize) : undefined,
+            };
+        } catch (error) {
+            throw new Error("Failed to fetch ExtraData: " + error.message);
+        }
     },
 
     getExtraData: async ({ id, testCaseId, nodeId, userId, roleId, roles, dataType, hasField }) => {
@@ -49,7 +124,7 @@ const extraDataService = {
                     user: { role: { name: { in: roles.split(",") } } },
                     ...(testCaseNodeIds.length && { testCaseNodeId: { in: testCaseNodeIds } }),
                 },
-                include: { user: true },
+                include: { user: true }
             });
         } else {
             records = await prisma.extraData.findMany({

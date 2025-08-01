@@ -2,13 +2,21 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 const testCaseService = {
-    getAllTestCases: async () => {
+    getAllTestCases: async ({ page, pageSize } = {}) => {
         try {
-            const testCases = await prisma.testCase.findMany({
-                include: {
-                    user: true
-                },
-            });
+            let options = {
+                include: { user: true }
+            };
+
+            // Nếu có page và pageSize thì phân trang, ngược lại lấy all
+            if (page && pageSize) {
+                const p = parseInt(page);
+                const ps = parseInt(pageSize);
+                options.skip = (p - 1) * ps;
+                options.take = ps;
+            }
+
+            const testCases = await prisma.testCase.findMany(options);
             return {
                 status: 200,
                 success: true,
@@ -137,14 +145,14 @@ const testCaseService = {
                 }
                 return acc;
             }, {});
-
+            /*
             if (Object.keys(dataToUpdate).length === 0) {
                 return {
                     status: 400,
                     success: false,
                     message: "No fields have been modified. Update aborted.",
                 };
-            }
+            }*/
 
             // Nếu có name mới → kiểm tra trùng
             if (dataToUpdate.name) {

@@ -8,10 +8,12 @@ const N8nService = {
 
     exportWorkflowFromTestCase: async (testCaseId) => {
         try {
-            const testCase = await prisma.testCase.findUnique({
+            const testCase = await prisma.TestCase.findUnique({
                 where: { id: testCaseId },
                 select: { id: true, xmlContent: true },
             });
+
+
 
             if (!testCase || !testCase.xmlContent) {
                 return {
@@ -21,18 +23,32 @@ const N8nService = {
                 };
             }
 
-            const response = await axios.post(
-                `${N8nService.N8N_ENDPOINT}/api/v1/workflows`,
-                testCase.xmlContent,
-                { headers: { "Content-Type": "application/json" } }
-            );
+            const tokenResponse = await N8nService.getToken();
+            if (!tokenResponse?.data?.access_token) {
+                return {
+                    status: 500,
+                    success: false,
+                    message: "Failed to retrieve access token",
+                };
+            }
 
-            const n8nWorkflowId = response?.data?.data?.id;
+            const token = tokenResponse.data.access_token;
+
+
+            const response = await axios.post(
+                `${N8nService.N8N_ENDPOINT}/test-automation/api/v1/workflows`,
+                testCase.xmlContent,
+                { headers: { "Content-Type": "text/xml", 'Authorization': `Bearer ${token}` } }
+            );
+            console.log(response);
+
+            const n8nWorkflowId = response?.data?.data?.id || response?.data?.id;
             if (!n8nWorkflowId) {
                 return {
                     status: 500,
                     success: false,
                     message: "Failed to retrieve n8n workflow ID",
+                    n8nResponse: response.data, // <--- Thêm dòng này
                 };
             }
 
@@ -56,7 +72,7 @@ const N8nService = {
     getWorkflow: async (workflowId) => {
         try {
             const response = await axios.get(
-                `${N8nService.N8N_ENDPOINT}/api/v1/workflows/${workflowId}`,
+                `${N8nService.N8N_ENDPOINT}/test-automation/api/v1/workflows/${workflowId}`,
                 { headers: { "Content-Type": "application/json" } }
             );
 
@@ -68,6 +84,33 @@ const N8nService = {
             };
         } catch (error) {
             throw new Error("Failed to retrieve workflow: " + error.message);
+        }
+    },
+
+    getToken: async () => {
+        try {
+            const url = `${N8nService.N8N_ENDPOINT}/auth/token`;
+
+            const data = new URLSearchParams({
+                client_id: process.env.CLIENT_ID,
+                grant_type: 'client_credentials',
+                client_secret: process.env.CLIENT_SECRET,
+            });
+
+            const response = await axios.post(url, data.toString(), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            });
+
+            return {
+                status: 200,
+                success: true,
+                message: 'Token fetched successfully',
+                data: response.data,
+            };
+        } catch (error) {
+            throw new Error('Failed to retrieve token: ' + (error.response?.data?.error || error.message));
         }
     },
 

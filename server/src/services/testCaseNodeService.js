@@ -2,6 +2,67 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 const testCaseNodeService = {
+    getAllTestCaseNodes: async ({ testCaseId, page, pageSize }) => {
+        try {
+            const testCase = await prisma.testCase.findUnique({
+                where: { id: testCaseId },
+                select: { id: true, xmlContent: true },
+            });
+
+            if (!testCase) {
+                return { status: 404, success: false, message: "Test case not found" };
+            }
+
+            const skip = page && pageSize ? (parseInt(page) - 1) * parseInt(pageSize) : undefined;
+            const take = page && pageSize ? parseInt(pageSize) : undefined;
+
+            const nodes = await prisma.testCaseNode.findMany({
+                where: { testCaseId },
+                select: {
+                    nodeId: true,
+                    extraData: {
+                        select: {
+                            data: true,
+                            description: true,
+                            attachments: true,
+                        }
+                    }
+                },
+                skip,
+                take,
+            });
+
+            const total = await prisma.testCaseNode.count({ where: { testCaseId } });
+
+            const formattedNodes = nodes.map((n) => {
+                const merged = n.extraData
+                    .filter(Boolean)
+                    .reduce((acc, cur) => ({
+                        ...acc,
+                        ...cur.data,
+                        ...(cur.description ? { description: cur.description } : {}),
+                        ...(cur.attachments && cur.attachments.length > 0 ? { attachments: cur.attachments } : {})
+                    }), {});
+                return { nodeId: n.nodeId, extraData: merged };
+            });
+
+            return {
+                status: 200,
+                success: true,
+                data: {
+                    testCaseId: testCase.id,
+                    xmlContent: testCase.xmlContent,
+                    nodes: formattedNodes,
+                    total,
+                    page: page ? parseInt(page) : undefined,
+                    pageSize: pageSize ? parseInt(pageSize) : undefined,
+                },
+            };
+        } catch (error) {
+            throw new Error("Failed to fetch test case nodes: " + error.message);
+        }
+    },
+
     // Lấy toàn bộ node theo testCaseId
     getNodesByTestCaseId: async (testCaseId) => {
         try {
@@ -28,15 +89,30 @@ const testCaseNodeService = {
                     extraData: {
                         select: {
                             data: true,
+                            description: true,    // lấy ở đây
+                            attachments: true     // lấy ở đây
                         }
                     }
                 }
             });
 
-            const formattedNodes = nodes.map(n => ({
-                nodeId: n.nodeId,
-                extraData: n.extraData.map(ed => ed.data), // lấy toàn bộ object data của extraData
-            }));
+            const formattedNodes = nodes.map((n) => {
+                // gộp extraData thành 1 object
+                const merged = n.extraData
+                    .filter(Boolean)
+                    .reduce((acc, cur) => ({
+                        ...acc,
+                        ...cur.data,
+                        // merge description và attachments nếu có
+                        ...(cur.description ? { description: cur.description } : {}),
+                        ...(cur.attachments && cur.attachments.length > 0 ? { attachments: cur.attachments } : {})
+                    }), {});
+
+                return {
+                    nodeId: n.nodeId,
+                    extraData: merged
+                };
+            });
 
             return {
                 status: 200,

@@ -2,7 +2,8 @@ import extraDataService from "../services/extraDataService.js";
 
 const extraDataController = {
     getAllExtraData: async (req, res) => {
-        const result = await extraDataService.getAllExtraData();
+        const { page, pageSize } = req.query;
+        const result = await extraDataService.getAllExtraData({ page, pageSize });
         res.status(result.status).json(result);
     },
 
@@ -28,6 +29,12 @@ const extraDataController = {
         const result = await extraDataService.deleteExtraData(req.params); // { testCaseId, nodeId, userId }
         res.status(result.status).json(result);
     },
+    // Trong extraDataController.js bạn thêm hàm:
+    getN8nNode: async (req, res) => {
+        const result = await extraDataService.getN8nNode(req.params); // truyền { id }
+        res.status(result.status).json(result);
+    },
+
 };
 
 export default extraDataController;

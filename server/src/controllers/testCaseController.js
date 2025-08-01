@@ -2,7 +2,8 @@ import testCaseService from "../services/testCaseService.js";
 
 const testCaseController = {
   getAllTestCases: async (req, res) => {
-    const result = await testCaseService.getAllTestCases();
+    const { page, pageSize } = req.query;
+    const result = await testCaseService.getAllTestCases({ page, pageSize });
     res.status(result.status).json(result);
   },
 

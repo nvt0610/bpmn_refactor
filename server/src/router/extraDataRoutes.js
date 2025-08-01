@@ -10,6 +10,8 @@ const extraDataRoutes = (app) => {
     router.put("/:id", extraDataController.updateExtraData);      // cần id để update
     router.delete("/:id", extraDataController.deleteExtraData);
 
+    router.get("/:id/n8n-node", extraDataController.getN8nNode);
+
     return app.use("/api/extradata", router);
 };
 

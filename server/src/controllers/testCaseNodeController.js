@@ -11,7 +11,7 @@ const testCaseNodeController = {
         const result = await testCaseNodeService.createNode(req.body);
         res.status(result.status).json(result);
     },
-    
+
     updateNode: async (req, res) => {
         const result = await testCaseNodeService.updateNode(req.body);
         res.status(result.status).json(result);
@@ -21,6 +21,13 @@ const testCaseNodeController = {
         const result = await testCaseNodeService.deleteNode(req.body);
         res.status(result.status).json(result);
     },
+    
+    getAllTestCaseNodes: async (req, res) => {
+        const { testCaseId, page, pageSize } = req.query;
+        const result = await testCaseNodeService.getAllTestCaseNodes({ testCaseId, page, pageSize });
+        res.status(result.status).json(result);
+    },
+
 };
 
 export default testCaseNodeController;

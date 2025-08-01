@@ -4,6 +4,7 @@ import testCaseNodeController from "../controllers/testCaseNodeController.js";
 const router = express.Router();
 
 const testCaseNodeRoutes = (app) => {
+  router.get("/all", testCaseNodeController.getAllTestCaseNodes);
   router.get("/:testCaseId", testCaseNodeController.getNodesByTestCaseId);
   router.post("/", testCaseNodeController.createNode);
   router.delete("/", testCaseNodeController.deleteNode);
